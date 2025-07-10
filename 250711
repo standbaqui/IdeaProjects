@@ -1,0 +1,830 @@
+<dom-module id="es-bycorp-stat-list">
+		<!--
+        ******************************************************************************************
+        ** @Program-name    : 진단키트 > 법인별 통계 화면
+        ** @Description     :
+        ** @Author          : 임정연
+        ** @Create Date     : 2024.05.30
+        ** @History         : 2024.05.30 임정연 최초작성
+        ** @TODO     		: 화면 전환시 팀장/관리자 - 담당자 구분값 : 인사 정보(공통) 구축 후 결정 가능
+        ******************************************************************************************
+    -->
+	<style>
+		:host {
+			@apply(--vbox-layout);
+		}
+	</style>
+	
+	<template>
+		<!--
+            ************************************************************************************************************
+            * Service Area
+            ************************************************************************************************************
+         -->
+        
+        <!-- 공통 코드 조회 -->
+		<sc-request-group id="codes" init>
+		<sc-code-group>
+			<sc-code code="NRGC301" value="{{codes.items}}"></sc-code> 				<!-- 센싱 항목 -->
+			<sc-code code="NRGC305" value="{{codes.corpCd}}"></sc-code>				<!-- 진단키트 법인회사 -->
+			<sc-code code="NRGC306" value="{{codes.insptCrtraCont}}"></sc-code>		<!-- 진단키트 점검기준내용 -->
+		</sc-code-group>
+			<!-- <sc-ajax id="findInsptFactBiCorpCdList" url="findInsptFactBiCorpCdList.do" last-response="{{resultCorpnm}}"></sc-ajax> -->
+		</sc-request-group>
+
+		<!-- table list 조회 -->
+		<sc-ajax id="findInsptFactBiByMonthList" url="findInsptFactBiByMonthList.do" body="{{searchParam}}" on-response="completeSearchList"></sc-ajax>
+
+		<!-- 화면 권한 체크 -->
+		<cc-auth-checker check-list="auth-r"></cc-auth-checker>
+
+		<!--
+            ************************************************************************************************************
+            * UI Area
+            ************************************************************************************************************
+        -->
+        
+		<!-- 조회조건 -->
+		<div class="vbox flex">
+			<cc-search-condition-panel on-search="onSearchList" validation-group="search" auth-r>
+                <cc-fieldset>
+					<sc-label text="[[translate('ZSRMGC01.545')]]" class="mandatory"></sc-label><!-- 조회연월 -->
+					<sc-month-field value="{{searchParam.crtra_yymm}}" default-value="-1M" string-date="true" required="true"> </sc-month-field>
+				</cc-fieldset>
+			</cc-search-condition-panel>
+
+			<sc-grid id="gridPanel" class="flex" editable="false" on-item-click="onDataCellClicked" use-state="false" use-selection="false" data-provider="{{resultSearchList}}" show-number-line="true" show-tooltip="true" locked-column-count="2">
+				<cc-grid-toolbar>
+				<!-- 범례 디자인 Type 2 : 클릭시 화면에서 확인 가능 -->
+				<div class="status_explain type2">
+					<sc-checkbox-field label="Status Info." checked></sc-checkbox-field>
+					<div class="status_container">
+						<div class="red"><sc-label text="[[translate('STD.SRMGC0060')]]"></sc-label></div> <!-- 율(%) 비교 시 최대값 -->
+						<div class="green"><sc-label text="[[translate('STD.SRMGC0061')]]"></sc-label></div> <!-- 율(%) 비교 시 최소값 -->
+					</div>
+				</div>
+				<!-- 범례 디자인 Type 2 : 끝 -->
+				<!-- 범례 디자인 Type 2 : 클릭시 화면에서 확인 가능 -->
+				<div class="status_explain type2">
+					<sc-checkbox-field label="공통 적용 기준"></sc-checkbox-field>
+					<div class="status_container">
+						<sc-label text="[[translate('STD.SRMGC0059')]]"></sc-label><!-- Info유효한 전체원가검토서 기준, F등급 제외 -->
+					</div>
+				</div>
+				<!-- 범례 디자인 Type 2 : 끝 -->
+					<sc-button text="펼침" 			on-click="onExpandAll"></sc-button>
+					<sc-menu-button text="접기">
+						<template is="dom-repeat" items="{{dropDownMenuList}}">
+							<sc-button text="{{item.menu_nm}}" on-click="onCollapseAll" data-args="{{item.menu_id}}"></sc-button>
+						</template>
+					</sc-menu-button>
+					<sc-button text="과거진단조회"		on-click="onPastList"	auth-r></sc-button>
+					<sc-button text="사유/대책 관리"	on-click="onMoveMng"	auth-r hidden="[[!formula('authorization')]]"></sc-button>	
+				</cc-grid-toolbar>
+				
+				<sc-grid-columns>
+				</sc-grid-columns>
+				
+				<!-- hidden Column -->
+				<sc-grid-fields>
+					<sc-data-column data-field="largest_rank"		header-text="최대값"></sc-data-column>
+					<sc-data-column data-field="lowest_rank"		header-text="최소값"></sc-data-column>
+				</sc-grid-fields>
+			</sc-grid>
+		</div>
+		<template id="defaultColumnsTemplate">
+			<sc-grid-columns id="defaultColumns">
+				<sc-combobox-column data-field="inspt_fact_cd"		header-text="진단항목" 	width="270"	items="{{codes.items}}" display-field="label"	value-field="data" 	style-name="link" text-align="left" mergeable="true" merge-based-field="inspt_fact_cd"></sc-combobox-column>
+				<sc-combobox-column data-field="inspt_crtra_cont"	header-text="기준" 		width="250"	items="{{codes.insptCrtraCont}}" display-field="label"	value-field="data" text-align="left"  content-tooltip-callback="contentcallBack"></sc-combobox-column>
+				<sc-data-column 	data-field="nl_scop_val"		header-text="정상범위값" 	width="130" text-align="left"></sc-data-column>
+					
+				<sc-group-column 									header-text="총계"		width="[[formula('setWidth')]]">
+					<sc-data-column data-field="all_all_cnt"		header-text="총건수" 		width="70" 	text-align="right" 		data-type="number" 		format-type="integer"	visible="{{visible_allCnt}}"></sc-data-column>
+					<sc-data-column data-field="all_sub_cnt"		header-text="대상건수" 	width="100" text-align="right" 		data-type="number" 		format-type="integer"	visible="{{visible_subCnt}}"></sc-data-column>
+					<sc-data-column data-field="all_ro"				header-text="율(%)" 		width="60" 	text-align="right" 		data-type="number" 		format-type="amt"		visible="{{visible_roCnt}}"></sc-data-column>
+				</sc-group-column>
+			</sc-grid-columns>
+		</template>
+	</template>
+	
+	<script>
+		Polymer({
+			is: "es-bycorp-stat-list",
+			properties: {
+				dropDownMenuList: {
+					type: Array,
+					reset: false,
+					value: function() {
+						return [
+							{menu_nm: this.translate('총건수'),	menu_id: "all_cnt"},
+							{menu_nm: this.translate('대상건수'),	menu_id: "sub_cnt"},
+							{menu_nm: this.translate('율(%)'),	menu_id: "ro_cnt"},
+							];
+					}
+				},
+				searchParam: {
+					type: Object,
+					value: function() {
+						return {}
+					},
+				},
+				codes: { // 코드 데이터
+					type: Object,
+					value: function() {
+						return {
+							yearList: [],
+							monList:[],
+							corpCd : [],
+							corpNm : [],	// 법인 코드 : 동적컬럼 위한tmp
+							insptCrtraCont : [],
+						};
+					},
+					reset: false
+				},
+				visible_allCnt : {
+					type: Object,
+					value: function() {
+						return false;
+					}
+				},
+				visible_subCnt : {
+					type: Object,
+					value: function() {
+						return false;
+					}
+				},
+				visible_roCnt : {
+					type: Object,
+					value: function() {
+						return true;
+					}
+				},
+				resultSearchList: {
+					type: Array,
+					value: function() {
+						return [];
+					}
+				},
+				
+				resultSearchList: {
+					type: Array,
+					value: function() {
+						return [];
+					}
+				},
+				// 법인코드 : 동적컬럼 위한 tmp
+				resultCorpnm: {
+					type: Array,
+					value: function() {
+						return[]
+					}
+				},
+				
+			},
+			
+			behaviors : [
+				Polymer.Templatizer
+			],
+
+			formulas: {
+				authorization : function(){
+                    return (this.get("searchParam.usr_typ") === "pic");
+                },
+                setWidth : function(){
+                	if(this.get("visible_allCnt")&&this.get("visible_subCnt")&&this.get("visible_roCnt")){
+                		return "330";
+                	}else if(this.get("visible_subCnt")){
+                		return "180";
+                	}else{
+                		return "120";
+                	}
+                },
+                setHeaderText : function(){
+                	if(this.get("visible_allCnt")){
+                		return "총건수";
+                	}else if(this.get("visible_subCnt")){
+                		return "대상건수";
+                	}else if(this.get("visible_roCnt")){
+                		return "율(%)";
+                	}else{
+                		return "90";
+                	}
+                },
+            },
+			/******************************
+             * 초기화 설정
+             ******************************/
+            // 초기화 완료 후 호출 함수
+            initialized: function () {
+				this.onSearchList();
+			},
+			
+            load: function(data) {
+                var me = this;
+                this.onSearchList();
+            },
+			//-----------------
+			//조회
+			//-----------------
+	        // 목록조회
+            onSearchList : function() {
+				var me = this;
+				if(!me.validate('search')) {
+					UT.alert("STD.E0000");	//STD.E0000 : 유효하지 않은 입력값이 있습니다. 오류 정보를 확인해 주세요.
+					return;
+				}
+				//담당자 선택 시 해당 사용자 데이터만 조회 될 수 있도록
+				if(me.get("searchParam.usr_typ") == 'pic'){
+					var userId = SCSessionManager.currentUser.usr_id;
+					me.set("searchParam.user_id",userId);
+				}else{
+					me.set("searchParam.user_id",'');
+				}
+				var corpCds = me.codes.corpCd;
+				var corpCdslength = corpCds.length;
+				var corp_cds = [];
+				for(var i = 0; i < corpCdslength; i++){
+					corp_cds.push(corpCds[i].data);//data_label로 할 경우 쿼리 에러 남//헤더에 data_label을 해야 된다
+				}
+				console.log("::::corp_cds : "+corp_cds);
+				me.set("searchParam.corp_cds",corp_cds);
+				UT.request(me.$.findInsptFactBiByMonthList); 
+			},	
+			
+			completeSearchList : function(e, res){
+				var me = this;
+				var result = res.response;
+				var corpList = me.get("searchParam.corp_cds");
+				me.$.gridPanel.addedColumnsReset();
+				
+				var corpCds2 = me.codes.corpCd;
+				var corpCdslength2 = corpCds2.length;
+				var corp_cds2 = [];
+				for(var i = 0; i < corpCdslength2; i++){
+					corp_cds2.push(corpCds2[i].data_label);//data_label로 할 경우 쿼리 에러 남//헤더에 data_label을 해야 된다
+				}
+				
+				//기본컬럼
+				var defaultColumns = UT.templateColumns(this, '#defaultColumnsTemplate', '#defaultColumns');
+				console.log(":::dataField : "+JSON.stringify(corp_cds2));
+				for(var i = 0; i<corpCdslength2; i++){
+					headText = "총계_"
+					groupColumn = me.createGroupColumn(headText);
+					
+					createColumn1 = me.createColumn1(corp_cds2,headText,70,"right", true,"Y",false)
+					//createColumn1 : function(dataField, headerText, width, textAlign, visible, required, type)
+				}
+				groupColumn.appendChild(createColumn1);
+				defaultColumns.push(groupColumn);
+				
+				/*
+				 var headerGrpCol = document.createElement('sc-group-column');
+                headerGrpCol.headerText = "총계";
+                headerGrpCol.width = 230;
+                
+                headerGrpCol.appendChild(headerGrpCol1);
+                headerGrpCol.appendChild(headerGrpCol2);
+                headerGrpCol.appendChild(headerGrpCol3);
+                
+                columns.push(headerGrpCol);
+				*/
+				/*
+				var headerCol1 = document.createElement('sc-combobox-column');
+                headerCol1.dataField = "inspt_fact_cd";
+                headerCol1.headerText = "진단항목";
+                headerCol1.width = 270;
+                headerCol1.textAlign = "left";
+                headerCol1.editable = "false";
+                headerCol1.items = me.codes.items;
+                
+                columns.push(headerCol1);
+                
+                var headerCol2 = document.createElement('sc-combobox-column');
+                headerCol2.dataField = "inspt_crtra_cont";
+                headerCol2.headerText = "기준";
+                headerCol2.width = 250;
+                headerCol2.textAlign = "left";
+                headerCol2.editable = "false";
+                headerCol2.items = me.codes.insptCrtraCont;
+                
+                columns.push(headerCol2);
+                
+                var headerCol3 = document.createElement('sc-data-column');
+                headerCol3.dataField = "nl_scop_val";
+                headerCol3.headerText = "정상범위값";
+                headerCol3.width = 130;
+                headerCol3.textAlign = "right";
+                headerCol3.dataType="number";
+                headerCol3.formatType="integer";
+				
+                columns.push(headerCol3);
+                
+                var headerGrpCol1 = document.createElement('sc-data-column');
+                headerGrpCol1.dataField = "all_all_cnt";
+                headerGrpCol1.headerText = "총건수";
+                headerGrpCol1.width = 70;
+                headerGrpCol1.textAlign = "right";
+                headerGrpCol1.dataType="number";
+                headerGrpCol1.formatType="integer";
+				
+                var headerGrpCol2 = document.createElement('sc-data-column');
+                headerGrpCol2.dataField = "all_sub_cnt";
+                headerGrpCol2.headerText = "대상건수";
+                headerGrpCol2.width = 100;
+                headerGrpCol2.textAlign = "right";
+                headerGrpCol2.dataType="number";
+                headerGrpCol2.formatType="integer";
+				
+                var headerGrpCol3 = document.createElement('sc-data-column');
+                headerGrpCol3.dataField = "all_ro";
+                headerGrpCol3.headerText = "율(%)";
+                headerGrpCol3.width = 60;
+                headerGrpCol3.textAlign = "right";
+                headerGrpCol2.dataType="number";
+                headerGrpCol2.formatType="amt";
+				
+                var headerGrpCol = document.createElement('sc-group-column');
+                headerGrpCol.headerText = "총계";
+                headerGrpCol.width = 230;
+                
+                headerGrpCol.appendChild(headerGrpCol1);
+                headerGrpCol.appendChild(headerGrpCol2);
+                headerGrpCol.appendChild(headerGrpCol3);
+                
+                columns.push(headerGrpCol);
+                /**/
+                /*
+				for (var i = 0; i < corpList.length; i++){
+					var deptNm = corpList[i];
+					var deptNmLow = corpList[i].toLowerCase();
+					
+					var col1 = document.createElement('sc-image-column');
+	                col1.dataField = deptNmLow+"_ro_status";
+	                col1.headerText = "";
+	                col1.width = 30;
+	                col1.textAlign = "center";
+	                col1.editable="false";
+	                col1.imageCls="circleGray";
+	                col1.imageChangeFunction="statusImageChange";
+	                col1.excludeExport="true";
+	                
+	                if(this.get("visible_allCnt")){
+						var col2 = document.createElement('sc-data-column');
+		                col2.dataField = deptNmLow+"_all_cnt";
+		                col2.headerText = "총건수";
+		                col2.width = 70;
+		                col2.textAlign = "right";
+		                col2.dataType="number";
+		                col2.formatType="integer";
+		                //col2.visible="visible_allCnt";
+	                }
+
+	                if(this.get("visible_subCnt")){
+		                var col3 = document.createElement('sc-data-column');
+		                col3.dataField = deptNmLow+"_sub_cnt";
+		                col3.headerText = "대상건수";
+		                col3.width = 100;
+		                col3.textAlign = "right";
+		                col3.dataType="number";
+		                col3.formatType="integer";
+		                //col3.visible="visible_subCnt";
+		                col3.styleName="link";
+	                }
+	
+	                if(this.get("visible_roCnt")){
+		                var col4 = document.createElement('sc-data-column');
+		                col4.dataField = deptNmLow+"_ro";
+		                col4.headerText = "율(%)";
+		                col4.width = 60;
+		                col4.textAlign = "right";
+		                col4.dataType="number";
+		                col4.formatType="amt";
+		                //col4.style.visibility= "{{visible_roCnt}}";
+	                }
+	                	//debugger;//visible_allCnt
+	                
+	                
+	                var colG = document.createElement('sc-group-column');
+	                colG.headerText = deptNm;
+	                //colG.width = 300;
+	                //debugger;
+	               if(this.get("visible_allCnt")&&this.get("visible_subCnt")&&this.get("visible_roCnt")){
+            			return colG.width = 300;
+	            	}else if(this.get("visible_subCnt")){
+	            		return colG.width = 150;
+	            	}else{
+	            		return colG.width = 90;
+	            	}
+	                
+	                colG.appendChild(col1);
+	                if(this.get("visible_allCnt")){
+	                	colG.appendChild(col2);
+	                }
+	                if(this.get("visible_subCnt")){
+	                	colG.appendChild(col3);
+	                }
+	                if(this.get("visible_roCnt")){
+	                	colG.appendChild(col4);
+	                }
+	                
+	                columns.push(colG);
+				}
+                */
+                me.$.gridPanel.refresh();
+                //컬럼 셋팅
+                me.$.gridPanel.setColumns(defaultColumns);
+				me.set("resultSearchList", result);
+			},
+
+			createGroupColumn: function(headerText) {
+                var grpCol = document.createElement("sc-group-column");
+                grpCol.headerText = headerText;
+                return grpCol;
+            },
+
+			//데이터 필드 생성_총건수
+//			createColumn1 : function(dataField, headerText, width, textAlign, visible, required, type) {
+			createColumn1 : function(dataField, headerText, width, textAlign, visible, required, type) {
+				var column = document.createElement("sc-data-column");
+				column.dataField    = dataField;
+				column.headerText   = "총건수";
+				column.width        = width || "70";
+				column.textAlign    = textAlign || "right";
+				column.dataType = "number";
+				column.formatType = "integral";
+				if(visible === "N") {
+					column.visible = false;
+				}
+				return column;
+			},
+			//데이터 필드 생성_대상건수
+			createColumn2 : function(dataField, headerText, width, textAlign, visible, required, type) {
+				var column = document.createElement("sc-data-column");
+				column.dataField    = dataField;
+				column.headerText   = "대상건수";
+				column.width        = width || "100";
+				column.textAlign    = textAlign || "right";
+				column.dataType = "number";
+				column.formatType = "integral";
+				if(visible === "N") {
+					column.visible = false;
+				}
+				return column;
+			},
+			//데이터 필드 생성_율(%)
+			createColumn3 : function(dataField, headerText, width, textAlign, visible, required, type) {
+				var column = document.createElement("sc-data-column");
+				column.dataField    = dataField;
+				column.headerText   = "율(%)";
+				column.width        = width || "60";
+				column.textAlign    = textAlign || "right";
+				column.dataType = "number";
+				column.formatType = "amt";
+				if(visible === "N") {
+					column.visible = false;
+				}
+				return column;
+			},
+			//이미지 필드 생성
+			createImgColumn : function(dataField, headerText, width, textAlign) {
+				var column = document.createElement("sc-image-column");
+				column.imageCls = "circleGray" ;
+				column.dataField    = dataField;
+				column.headerText   = "Status";
+				column.width        = width || "60";
+				column.textAlign    = textAlign || "center";
+				column.editable     = "false";
+				column.excludeExport = true;
+				column.imageChangeFunction = "statusImageChange"
+				return column;
+			},
+
+			onDataCellClicked: function(e) {
+				var me   = this;
+				var item = e.detail.item;
+				var data = e.detail.data;
+				var fieldName = item.dataField;
+				data.usr_typ = me.get("searchParam.usr_typ");
+				data.crtra_yymm = me.get("searchParam.crtra_yymm");
+				data.page = "det";
+
+				//inspt_fact_cd일때랑 대상건수일때만 페이지 이동
+				if((fieldName.includes("_sub_cnt") && fieldName !== "all_sub_cnt")){
+					var cordCd = fieldName.split("_");
+					data.corp_cd = cordCd[0].toUpperCase();
+					//mng, pic
+					me.fire("show-inspt-fact", data);
+				}else if(fieldName === 'inspt_fact_cd'){
+					//mng, pic
+					me.fire("show-inspt-fact", data);
+				}else if( UT.isEmpty(fieldName) || fieldName === "all_all_cnt" ||fieldName === "all_sub_cnt"||fieldName === "all_ro"){
+					return;
+				}else{
+					return;
+				}
+				
+			},
+			
+			//-----------------
+			//버튼
+			//-----------------
+			//펼침
+			onExpandAll : function(){
+				var me = this;
+				me.set("visible_allCnt", true);
+				me.set("visible_subCnt", true);
+				me.set("visible_roCnt",  true);
+				this.applyFormula("setWidth");
+			},
+			
+			//접기(총, 대상건수, 율(%))
+			onCollapseAll : function(e){
+				var me = this;
+				var bnt = e.currentTarget.dataArgs;
+				
+				if(bnt == 'all_cnt'){
+					me.set("visible_allCnt", true);
+					me.set("visible_subCnt", false);
+					me.set("visible_roCnt",  false);
+				}
+				if(bnt == 'sub_cnt'){
+					me.set("visible_allCnt", false);
+					me.set("visible_subCnt", true);
+					me.set("visible_roCnt",  false);
+				}
+				if(bnt == 'ro_cnt'){
+					me.set("visible_allCnt", false);
+					me.set("visible_subCnt", false);
+					me.set("visible_roCnt",  true);
+				}
+				this.applyFormula("setWidth");
+			},
+			//과거진단조회 페이지로 이동
+			onPastList : function() {
+				var me = this;
+				me.set("searchParam.page", "bi");
+				
+            	me.fire("show-inspt-fact", me.searchParam);
+			},
+			//항목별 상세조회 페이지로 이동
+			onDetList : function() {
+				var me = this;
+				me.set("searchParam.page", "det");
+				
+            	me.fire("show-inspt-fact", me.searchParam);
+			},
+			//사유/대책 관리 페이지로 이동
+			onMoveMng : function() {
+				var me = this;
+				me.set("searchParam.page", "mng");
+				
+            	me.fire("show-inspt-fact", me.searchParam);
+			},
+			//라디오버튼 선택
+			gubunSelect : function() {
+				var me = this;
+				me.applyFormula();
+				me.onSearchList();
+			},
+			
+			//-----------------
+			//그리드 셀 스타일
+			//-----------------
+			statusImageChange: function(data, item) {
+                var me = this;
+                var isResult = null;
+                var maxVal = Number(data.largest_rank);	//#FFF0F0 : red
+				var minVal = Number(data.lowest_rank);	//#DDF4FB : blue
+				//0 -> green worst->red etc->yellow
+				switch(item.dataField){
+				case "samex_ro_status":
+					if(UT.isNotEmpty(data["samex_ro"]) && data["samex_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["samex_ro"]) && data["samex_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "sec_ro_status":
+					if(UT.isNotEmpty(data["sec_ro"]) && data["sec_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["sec_ro"]) && data["sec_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "ssec_ro_status":
+					if(UT.isNotEmpty(data["ssec_ro"]) && data["ssec_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["ssec_ro"]) && data["ssec_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "seha_ro_status":
+					if(UT.isNotEmpty(data["seha_ro"]) && data["seha_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["seha_ro"]) && data["seha_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "sehc_ro_status":
+					if(UT.isNotEmpty(data["sehc_ro"]) && data["sehc_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["sehc_ro"]) && data["sehc_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "semp_ro_status":
+					if(UT.isNotEmpty(data["semp_ro"]) && data["semp_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["semp_ro"]) && data["semp_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "seda_ro_status":
+					if(UT.isNotEmpty(data["seda_ro"]) && data["seda_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["seda_ro"]) && data["seda_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "sema_ro_status":
+					if(UT.isNotEmpty(data["sema_ro"]) && data["sema_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["sema_ro"]) && data["sema_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "sepm_ro_status":
+					if(UT.isNotEmpty(data["sepm_ro"]) && data["sepm_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["sepm_ro"]) && data["sepm_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "serk_ro_status":
+					if(UT.isNotEmpty(data["serk_ro"]) && data["serk_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["serk_ro"]) && data["serk_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "tse_ro_status":
+					if(UT.isNotEmpty(data["tse_ro"]) && data["tse_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["tse_ro"]) && data["tse_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "sieln_ro_status":
+					if(UT.isNotEmpty(data["sieln_ro"]) && data["sieln_ro"] == '0'){
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["sieln_ro"]) && data["sieln_ro"] === maxVal){
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				case "sielc_ro_status":
+					if(UT.isNotEmpty(data["sielc_ro"]) && data["sielc_ro"] == '0'){ 
+						isResult = "circleGreen";
+						break;
+					}else if(UT.isNotEmpty(data["sielc_ro"]) && data["sielc_ro"] === maxVal){ 
+						isResult = "circleRed";
+						break;
+					}else{
+						isResult = "circleYellow";
+						break;
+					}
+				default:
+					isResult = null;
+					break;
+				}
+				return isResult;
+            },
+            
+            //-----------------
+            //grid tooltip
+            //-----------------
+            contentcallBack: function(rowIndex, value, dataFieldName, rowData, displayValue) {
+            	switch(rowData.inspt_fact_cd){
+					case "F001"://SRM활용율
+	            	   if(value) {
+						return this.translate('STD.SRMGC0020')+'</br>'+this.translate('STD.SRMGC0029');
+	            	   }
+	            	break;
+					case "F002"://원가편차현황
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0021')+'</br>'+this.translate('STD.SRMGC0030')+'</br>'+this.translate('STD.SRMGC0041');
+	            	   }
+					break;
+					case "F003"://하위자재 적기반영
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0022')+'</br>'+this.translate('STD.SRMGC0031')+'</br>'+this.translate('STD.SRMGC0042');
+	            	   }
+					break;
+					case "F004"://원자재가 적기반영
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0023')+'</br>'+this.translate('STD.SRMGC0032')+'</br>'+this.translate('STD.SRMGC0042');
+	            	   }
+					break;
+					case "F005"://파생코드 과다ST점검-Assy
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0024')+'</br>'+this.translate('STD.SRMGC0034');
+	            	   }
+					break;
+					case "F006"://동일코드 과다ST점검-Assy
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0024')+'</br>'+this.translate('STD.SRMGC0033');
+	            	   }
+					break;
+					case "F008"://포장비 점검
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0026')+'</br>'+this.translate('STD.SRMGC0036');
+	            	   }
+					break;
+					case "F009"://운반비 점검
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0026')+'</br>'+this.translate('STD.SRMGC0037');
+	            	   }
+					break;
+					case "F010"://Loss율 점검
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0027')+'</br>'+this.translate('STD.SRMGC0038');
+	            	   }
+					break;
+					case "F011"://고가 원자재 점검
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0028')+'</br>'+this.translate('STD.SRMGC0039');
+	            	   }
+					break;
+					case "F012"://CIS사양 불일치건
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0026')+'</br>'+this.translate('STD.SRMGC0040')+'</br>'+this.translate('STD.SRMGC0088')+'</br>'+this.translate('STD.SRMGC0042');
+	            	   }
+					break;
+					case "F013"://파생코드 과다ST점검-단품
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0025')+'</br>'+this.translate('STD.SRMGC0035')+'</br>'+this.translate('STD.SRMGC0043');
+	            	   }
+					break;
+					case "F014"://동일코드 과다ST점검-단품
+	            	   if(value) {
+	   					return this.translate('STD.SRMGC0025')+'</br>'+this.translate('STD.SRMGC0033')+'</br>'+this.translate('STD.SRMGC0043');
+	            	   }
+					break;
+					default:
+					break;
+					}
+            	},
+            
+            
+		});
+		
+	</script>
+
+</dom-module>
